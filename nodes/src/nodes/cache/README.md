@@ -17,7 +17,41 @@ The cache key incorporates the question text, its context, and all response-shap
 
 Uses `ai.common.models.SentenceTransformer` (the same local loader as `embedding_transformer`) — no API key required. The embedding model is downloaded once on first use.
 
-## Wiring
+## Lanes
+
+| Lane in | Lane out | Description |
+|---|---|---|
+| `questions` | `answers` | Cached answer returned immediately on a hit, bypassing the LLM |
+| `questions` | `questions` | Question forwarded to the LLM on a cache miss |
+| `answers` | `answers` | LLM answer stored in cache, then forwarded downstream |
+
+## Profiles
+
+Default: **Balanced - good hit rate with low false matches** (`balanced`).
+
+| Profile | Threshold | Description |
+|---|---|---|
+| `balanced` **(default)** | 0.92 | Good hit rate with few false matches |
+| `strict` | 0.97 | Only near-identical questions hit |
+| `lenient` | 0.85 | Aggressive matching, higher hit rate |
+
+All profiles use `sentence-transformers/all-MiniLM-L6-v2` by default; override `model`, `threshold`, `max_entries`, `ttl_seconds`, or `scope` per node.
+
+## Configuration
+
+Select a profile to match your tolerance for semantic variation. The default **Balanced** profile (`threshold: 0.92`) balances hit rate and precision for most conversational workloads. Select **Strict** (`0.97`) when even slight paraphrasing could alter the meaning, or **Lenient** (`0.85`) for broader matching on general FAQs.
+
+You can override individual settings in the configuration panel:
+
+- **Similarity threshold (`threshold`):** Cosine similarity threshold (0.0 to 1.0) required to count as a cache hit. Higher values require closer semantic matches.
+- **Embedding model (`model`):** Local SentenceTransformers model used to generate embeddings. Defaults to `sentence-transformers/all-MiniLM-L6-v2`.
+- **Max entries (`max_entries`):** Upper limit on entries kept in memory. When exceeded, least-recently-used (LRU) entries are evicted (`0` = unbounded).
+- **TTL (`ttl_seconds`):** Expiration duration in seconds for cached entries (`0` = entries never expire).
+- **Scope (`scope`):** Optional tenant/environment namespace to isolate cached entries across pipelines.
+
+## Notes
+
+### Wiring
 
 The node sits on both the `questions` and `answers` lanes, around an LLM:
 
@@ -31,33 +65,14 @@ The node sits on both the `questions` and `answers` lanes, around an LLM:
 
 On a hit the cache emits directly on its `answers` output, bypassing the LLM. This is the same lane shape as `memory_persistent`.
 
-### Lanes
-
-| Lane        | Direction | Description                                                                 |
-| ----------- | --------- | --------------------------------------------------------------------------- |
-| `questions` | in        | Question to look up                                                          |
-| `questions` | out       | Forwarded to the LLM on a miss                                              |
-| `answers`   | in        | LLM answer to store                                                         |
-| `answers`   | out       | Cached answer on a hit, or the LLM's answer passed through on a miss        |
-
-### Profiles
-
-| Profile               | Threshold | Notes                                            |
-| --------------------- | --------- | ------------------------------------------------ |
-| Balanced _(default)_  | 0.92      | Good hit rate with few false matches             |
-| Strict                | 0.97      | Only near-identical questions hit                |
-| Lenient               | 0.85      | Aggressive matching, higher hit rate             |
-
-All profiles use `sentence-transformers/all-MiniLM-L6-v2` by default; override `model`, `threshold`, `max_entries`, or `ttl_seconds` per node.
-
-## Notes & limits
+### Limits & eviction
 
 - **Scope:** in-memory, per-pipe. Restarting the pipeline empties the cache. (A persistent backend is a natural future extension.)
 - **Eviction:** least-recently-used once `max_entries` is exceeded (`0` = unbounded); a hit or a store counts as a use.
 - **Expiry:** entries older than `ttl_seconds` are dropped (`0` = never expire).
 - **Threshold:** too low risks returning an answer to a *different* question; `0.92` is a conservative default for MiniLM. Tune per use case.
 
-## Security & privacy
+### Security & privacy
 
 - **Scope & Isolation.** All requests flowing through one pipe share the same cache unless scoped. Cached answers are strictly partitioned by tenant and session identifiers (`tenant_id`, `session_id`, `user_id` in question metadata) and the optional pipe-level `scope` configuration, ensuring cross-tenant and cross-session isolation.
 - **False hits.** A too-low `threshold` can return the answer to a *semantically near but different* question. Keep `threshold` conservative for correctness-sensitive use.
