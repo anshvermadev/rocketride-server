@@ -150,6 +150,12 @@
 			"title": "TTL (seconds)",
 			"description": "How long a cached answer stays valid before expiring (0 = never expire)",
 			"default": 0
+		},
+		"scope": {
+			"type": "string",
+			"title": "Cache scope",
+			"description": "Optional static partition scope for the cache. When set, only requests within this scope can share cached answers",
+			"default": ""
 		}
 	},
 	//
@@ -160,7 +166,7 @@
 		{
 			"section": "Pipe",
 			"title": "Semantic Cache",
-			"properties": ["model", "threshold", "max_entries", "ttl_seconds"]
+			"properties": ["model", "threshold", "max_entries", "ttl_seconds", "scope"]
 		}
 	]
 }

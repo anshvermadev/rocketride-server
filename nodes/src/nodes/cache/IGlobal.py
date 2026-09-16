@@ -30,7 +30,7 @@ shares them with every instance via ``self.embedder`` / ``self.cache``.
 
 from __future__ import annotations
 
-from rocketlib import IGlobalBase, OPEN_MODE, debug
+from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 from ai.common.config import Config
 
 # Default embedding model — matches the embedding_transformer "miniAll" profile:
@@ -57,6 +57,7 @@ class IGlobal(IGlobalBase):
     embedder = None
     cache = None
     config = None
+    scope = ''
 
     def beginGlobal(self) -> None:
         """Initialise the embedding model and the semantic cache from config."""
@@ -65,40 +66,50 @@ class IGlobal(IGlobalBase):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        import os
-        from depends import depends
+        try:
+            import os
+            from depends import depends
 
-        # Load this node's requirements before importing the model stack.
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
+            # Load this node's requirements before importing the model stack.
+            requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
+            depends(requirements)
 
-        # Resolve the node configuration (profile defaults merged with overrides).
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            # Resolve the node configuration (profile defaults merged with overrides).
+            self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        from .semantic_cache import SemanticCache
+            from .semantic_cache import SemanticCache
 
-        threshold = _coerce(self.config.get('threshold'), 0.92)
-        max_entries = _coerce(self.config.get('max_entries'), 1000)
-        ttl_seconds = _coerce(self.config.get('ttl_seconds'), 0.0)
-        model_name = self.config.get('model') or _DEFAULT_MODEL
+            threshold = _coerce(self.config.get('threshold'), 0.92)
+            max_entries = _coerce(self.config.get('max_entries'), 1000)
+            ttl_seconds = _coerce(self.config.get('ttl_seconds'), 0.0)
+            model_name = self.config.get('model') or _DEFAULT_MODEL
+            self.scope = str(self.config.get('scope') or '').strip()
 
-        self.cache = SemanticCache(
-            threshold=threshold,
-            max_entries=max_entries,
-            ttl_seconds=ttl_seconds,
-        )
+            self.cache = SemanticCache(
+                threshold=threshold,
+                max_entries=max_entries,
+                ttl_seconds=ttl_seconds,
+            )
 
-        from .embedder import TransformerEmbedder
+            from .embedder import TransformerEmbedder
 
-        self.embedder = TransformerEmbedder(model_name)
+            self.embedder = TransformerEmbedder(model_name)
 
-        debug(f'    Cache model       : {model_name}')
-        debug(f'    Cache threshold   : {threshold}')
-        debug(f'    Cache max entries : {max_entries}')
-        debug(f'    Cache TTL seconds : {ttl_seconds}')
+            debug(f'    Cache model       : {model_name}')
+            debug(f'    Cache threshold   : {threshold}')
+            debug(f'    Cache max entries : {max_entries}')
+            debug(f'    Cache TTL seconds : {ttl_seconds}')
+            if self.scope:
+                debug(f'    Cache scope       : {self.scope}')
+        except Exception as e:
+            warning(f'cache initialization failed: {e} — disabling cache passthrough')
+            debug(f'cache initialization exception details: {e}')
+            self.cache = None
+            self.embedder = None
 
     def endGlobal(self) -> None:
         """Release the cache and embedder at pipe close."""
         self.embedder = None
         self.cache = None
         self.config = None
+        self.scope = ''

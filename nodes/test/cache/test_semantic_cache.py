@@ -190,3 +190,31 @@ def test_concurrent_add_and_lookup_is_safe():
     assert not errors, errors
     # LRU bound is never exceeded despite concurrent inserts.
     assert len(c) <= 64
+
+
+def test_scope_isolation():
+    """Entries stored in one scope must never match lookups in a different scope."""
+    c = SemanticCache(threshold=0.5)
+    c.add([1.0, 0.0], 'q', 'answer_tenant_1', now=0.0, scope='tenant_1')
+    c.add([1.0, 0.0], 'q', 'answer_tenant_2', now=1.0, scope='tenant_2')
+
+    # Query with tenant_1 returns answer_tenant_1
+    assert c.lookup([1.0, 0.0], now=2.0, scope='tenant_1') == 'answer_tenant_1'
+    # Query with tenant_2 returns answer_tenant_2
+    assert c.lookup([1.0, 0.0], now=2.0, scope='tenant_2') == 'answer_tenant_2'
+    # Query with unknown or default scope misses
+    assert c.lookup([1.0, 0.0], now=2.0, scope='tenant_3') is None
+    assert c.lookup([1.0, 0.0], now=2.0, scope='') is None
+
+
+def test_structured_answer_payload():
+    """Cache supports structured dict and list payloads alongside plain text."""
+    c = SemanticCache(threshold=0.9)
+    dict_payload = {'payload': {'total': 123}, 'expectJson': True}
+    list_payload = {'payload': ['a', 'b'], 'expectJson': True}
+
+    c.add([1.0, 0.0], 'q_dict', dict_payload, now=0.0)
+    c.add([0.0, 1.0], 'q_list', list_payload, now=0.0)
+
+    assert c.lookup([1.0, 0.0], now=1.0) == dict_payload
+    assert c.lookup([0.0, 1.0], now=1.0) == list_payload

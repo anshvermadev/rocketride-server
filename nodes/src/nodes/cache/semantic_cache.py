@@ -37,7 +37,7 @@ import math
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -47,8 +47,9 @@ class CacheEntry:
     vector: List[float]
     norm: float
     query: str
-    answer: str
+    answer: Any
     created_at: float
+    scope: str = ''
 
 
 def _norm(vector: List[float]) -> float:
@@ -128,7 +129,7 @@ class SemanticCache:
         for key in expired:
             del self._entries[key]
 
-    def lookup(self, vector: List[float], now: float) -> Optional[str]:
+    def lookup(self, vector: List[float], now: float, scope: str = '') -> Optional[Any]:
         """
         Return the cached answer for the most similar entry at or above
         ``threshold``, or ``None`` on a miss.
@@ -140,6 +141,7 @@ class SemanticCache:
             vector: Query embedding.
             now: Current timestamp (seconds); supplied by the caller so the cache
                 stays deterministic and testable.
+            scope: Optional tenant or session scope partition.
         """
         with self._lock:
             self._expire(now)
@@ -152,6 +154,8 @@ class SemanticCache:
             best_key: Optional[int] = None
             best_sim = -1.0
             for key, entry in self._entries.items():
+                if entry.scope != scope:
+                    continue
                 if entry.norm == 0.0 or len(entry.vector) != len(vector):
                     continue
                 dot = 0.0
@@ -170,7 +174,7 @@ class SemanticCache:
             self.misses += 1
             return None
 
-    def add(self, vector: List[float], query: str, answer: str, now: float) -> bool:
+    def add(self, vector: List[float], query: str, answer: Any, now: float, scope: str = '') -> bool:
         """
         Store a (query -> answer) pair keyed by its embedding.
 
@@ -181,14 +185,17 @@ class SemanticCache:
         Args:
             vector: Query embedding.
             query: The query text (kept for debugging/observability).
-            answer: The answer text to cache.
+            answer: The answer payload (text or structured dict/list) to cache.
             now: Current timestamp (seconds).
+            scope: Optional tenant or session scope partition.
 
         Returns:
             True if the entry was stored, False if it was rejected.
         """
         norm = _norm(vector)
-        if norm == 0.0 or not answer:
+        if norm == 0.0 or answer is None:
+            return False
+        if isinstance(answer, str) and not answer:
             return False
 
         with self._lock:
@@ -200,6 +207,7 @@ class SemanticCache:
                 query=query,
                 answer=answer,
                 created_at=now,
+                scope=scope,
             )
 
             self._expire(now)

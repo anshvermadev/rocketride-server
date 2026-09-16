@@ -13,7 +13,7 @@ The cache sits in front of an LLM. For each incoming question it:
 
 This cuts cost and latency for repeated or near-duplicate prompts (FAQs, retried requests, paraphrased questions). The cache is **in-memory and lives for the duration of the pipe** — it is not shared across separate pipeline runs or processes.
 
-The cache key is the question text **and** its context, so in a RAG pipeline a different retrieved context correctly produces a miss — only an identical question *and* context reuse an answer.
+The cache key incorporates the question text, its context, and all response-shaping parameters. Context contributes to the semantic match but does not guarantee complete isolation: a changed yet sufficiently similar context may reuse a cached answer and bypass the LLM, while tenant and session scope metadata (`tenant_id`, `session_id`) strictly partition cached entries.
 
 Uses `ai.common.models.SentenceTransformer` (the same local loader as `embedding_transformer`) — no API key required. The embedding model is downloaded once on first use.
 
@@ -59,7 +59,7 @@ All profiles use `sentence-transformers/all-MiniLM-L6-v2` by default; override `
 
 ## Security & privacy
 
-- **Shared within a pipe — not tenant-isolated.** All requests flowing through one pipe share the same cache. In a multi-user deployment a sufficiently similar question from user B can be served user A's cached answer. Do **not** place this node on a shared multi-tenant pipe in front of user-specific or sensitive answers; run a cache per tenant/pipe, or only cache answers that are safe to share. (Per-session scoping via `session_id` metadata is a natural extension.)
+- **Scope & Isolation.** All requests flowing through one pipe share the same cache unless scoped. Cached answers are strictly partitioned by tenant and session identifiers (`tenant_id`, `session_id`, `user_id` in question metadata) and the optional pipe-level `scope` configuration, ensuring cross-tenant and cross-session isolation.
 - **False hits.** A too-low `threshold` can return the answer to a *semantically near but different* question. Keep `threshold` conservative for correctness-sensitive use.
 - **No content is logged.** The node logs only hit-rate and entry counts (never question or answer text), so prompts/answers aren't leaked to logs.
 - **Operator-configured model.** `model` is set by the pipeline author, not by end-user input; it is loaded through the same local loader as `embedding_transformer`.
